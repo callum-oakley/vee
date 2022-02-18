@@ -1,0 +1,11 @@
+[package]
+name = "vee"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+crossterm = "0.23"
+lazy_static = "1.4"
+regex = "1.5"
+unicode-width = "0.1"
