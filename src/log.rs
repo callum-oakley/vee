@@ -12,18 +12,16 @@ lazy_static! {
             .write(true)
             .truncate(true)
             .create(true)
-            .open("vee.log")
+            .open(".vee.log")
             .unwrap()
     );
 }
 
-#[allow(unused_macros)]
 macro_rules! log {
-    ($($arg:tt)*) => {{
-        use std::io::Write;
-        writeln!(crate::log::LOG.lock().unwrap(), $($arg)*).unwrap();
-    }};
+    ($($t:tt)*) => {{
+        use ::std::io::Write;
+        writeln!($crate::log::LOG.lock().unwrap(), $($t)*).unwrap();
+    }}
 }
 
-#[allow(unused_imports)]
 pub(crate) use log;
