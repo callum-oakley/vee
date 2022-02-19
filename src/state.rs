@@ -292,11 +292,11 @@ impl State {
             let mut x = if y == point.y { point.x } else { 0 };
             for c in self.text[y][x..].chars() {
                 match (c, pending.last()) {
-                    ('[' | '{' | '(' | '<', _) => pending.push(c),
-                    (']', Some('[')) | ('}', Some('{')) | (')', Some('(')) | ('>', Some('<')) => {
+                    ('[' | '{' | '(', _) => pending.push(c),
+                    (']', Some('[')) | ('}', Some('{')) | (')', Some('(')) => {
                         pending.pop();
                     }
-                    (']' | '}' | ')' | '>', _) => {
+                    (']' | '}' | ')', _) => {
                         return Some(Point { x, y });
                     }
                     _ => (),
@@ -318,11 +318,11 @@ impl State {
             for c in self.text[y][..x].chars().rev() {
                 x -= c.len_utf8();
                 match (c, pending.last()) {
-                    (']' | '}' | ')' | '>', _) => pending.push(c),
-                    ('[', Some(']')) | ('{', Some('}')) | ('(', Some(')')) | ('<', Some('>')) => {
+                    (']' | '}' | ')', _) => pending.push(c),
+                    ('[', Some(']')) | ('{', Some('}')) | ('(', Some(')')) => {
                         pending.pop();
                     }
-                    ('[' | '{' | '(' | '<', _) => {
+                    ('[' | '{' | '(', _) => {
                         return Some(Point { x, y });
                     }
                     _ => (),
@@ -333,7 +333,7 @@ impl State {
     }
 
     fn move_bracket_inside(&mut self) {
-        if let Some(']' | '}' | ')' | '>') = self.next_char(self.cursor.into()) {
+        if let Some(']' | '}' | ')') = self.next_char(self.cursor.into()) {
             if let Some(Point { x, y }) = self.open_bracket(self.cursor.into()) {
                 self.move_cursor(Point { y, x: x + 1 });
             }
@@ -343,14 +343,14 @@ impl State {
     }
 
     fn move_bracket_outside(&mut self) {
-        if let Some('[' | '{' | '(' | '<') = self.next_char(self.cursor.into()) {
+        if let Some('[' | '{' | '(') = self.next_char(self.cursor.into()) {
             if let Some(Point { x, y }) = self.close_bracket(Point {
                 x: self.cursor.x + 1,
                 y: self.cursor.y,
             }) {
                 self.move_cursor(Point { y, x: x + 1 });
             }
-        } else if let Some(']' | '}' | ')' | '>') = self.prev_char(self.cursor.into()) {
+        } else if let Some(']' | '}' | ')') = self.prev_char(self.cursor.into()) {
             if let Some(Point { x, y }) = self.open_bracket(Point {
                 x: self.cursor.x - 1,
                 y: self.cursor.y,
@@ -424,9 +424,9 @@ impl State {
     }
 
     fn select_outside_brackets(&mut self) {
-        if let Some('[' | '{' | '(' | '<') = self.next_char(self.cursor.into()) {
+        if let Some('[' | '{' | '(') = self.next_char(self.cursor.into()) {
             self.move_right(1);
-        } else if let Some(']' | '}' | ')' | '>') = self.prev_char(self.cursor.into()) {
+        } else if let Some(']' | '}' | ')') = self.prev_char(self.cursor.into()) {
             self.move_left(1);
         }
         self.select_inside_brackets();
