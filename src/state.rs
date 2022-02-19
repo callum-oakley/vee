@@ -220,7 +220,7 @@ impl State {
 
     fn left_word(&self, mut wordish: impl FnMut(char) -> bool, point: Point) -> Option<Point> {
         let mut point = point;
-        let mut seen_word = self.next_char(point).map(|c| wordish(c)).unwrap_or(false);
+        let mut seen_word = self.next_char(point).map_or(false, &mut wordish);
         for c in self.text[point.y][..point.x].chars().rev() {
             if seen_word && !wordish(c) {
                 break;
@@ -238,7 +238,7 @@ impl State {
 
     fn right_word(&self, mut wordish: impl FnMut(char) -> bool, point: Point) -> Option<Point> {
         let mut point = point;
-        let mut seen_word = self.prev_char(point).map(|c| wordish(c)).unwrap_or(false);
+        let mut seen_word = self.prev_char(point).map_or(false, &mut wordish);
         for c in self.text[point.y][point.x..].chars() {
             if seen_word && !wordish(c) {
                 break;
@@ -337,10 +337,8 @@ impl State {
             if let Some(Point { x, y }) = self.open_bracket(self.cursor.into()) {
                 self.move_cursor(Point { y, x: x + 1 });
             }
-        } else {
-            if let Some(Point { x, y }) = self.close_bracket(self.cursor.into()) {
-                self.move_cursor(Point { y, x });
-            }
+        } else if let Some(Point { x, y }) = self.close_bracket(self.cursor.into()) {
+            self.move_cursor(Point { y, x });
         }
     }
 
@@ -365,7 +363,7 @@ impl State {
     fn move_start_of_para(&mut self) {
         while self.cursor.y > 1 {
             self.cursor.y -= 1;
-            if self.text[self.cursor.y].len() > 0 && self.text[self.cursor.y - 1].len() == 0 {
+            if !self.text[self.cursor.y].is_empty() && self.text[self.cursor.y - 1].is_empty() {
                 self.move_start_of_line();
                 return;
             }
@@ -376,7 +374,7 @@ impl State {
     fn move_end_of_para(&mut self) {
         while self.cursor.y + 2 < self.text.len() {
             self.cursor.y += 1;
-            if self.text[self.cursor.y].len() > 0 && self.text[self.cursor.y + 1].len() == 0 {
+            if !self.text[self.cursor.y].is_empty() && self.text[self.cursor.y + 1].is_empty() {
                 self.move_end_of_line();
                 return;
             }

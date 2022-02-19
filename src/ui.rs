@@ -30,7 +30,7 @@ where
     };
     let selection = s.selection();
     for (y, line) in s.text[offset..usize::min(offset + h, s.text.len())]
-        .into_iter()
+        .iter()
         .enumerate()
     {
         let comment = COMMENT.find(line).map(|m| m.start());
