@@ -36,17 +36,17 @@ impl From<Cursor> for Point {
 pub enum Mode {
     Normal,
     Select,
-    Edit,
-    Space,
+    Insert,
+    System,
 }
 
 impl fmt::Display for Mode {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Mode::Normal => Ok(()),
+            Mode::Normal => write!(f, "NORMAL"),
             Mode::Select => write!(f, "SELECT"),
-            Mode::Edit => write!(f, "EDIT"),
-            Mode::Space => write!(f, "SPACE"),
+            Mode::Insert => write!(f, "INSERT"),
+            Mode::System => write!(f, "SYSTEM"),
         }
     }
 }
@@ -106,16 +106,16 @@ impl State {
                     KeyCode::Char('L') => self.move_right(5),
                     KeyCode::Esc if self.mode == Mode::Select => self.end_select(),
                     KeyCode::Char(' ') => {
-                        self.mode = Mode::Space;
+                        self.mode = Mode::System;
                     }
                     _ => (),
                 };
             }
-            Mode::Edit => match event.code {
+            Mode::Insert => match event.code {
                 KeyCode::Esc => self.end_edit(),
                 _ => (),
             },
-            Mode::Space => match event.code {
+            Mode::System => match event.code {
                 KeyCode::Char('q') => {
                     return false;
                 }
@@ -393,7 +393,7 @@ impl State {
     }
 
     fn begin_edit(&mut self) {
-        self.mode = Mode::Edit;
+        self.mode = Mode::Insert;
     }
 
     fn end_edit(&mut self) {

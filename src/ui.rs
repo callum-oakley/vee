@@ -66,15 +66,17 @@ where
         out,
         cursor::MoveTo(0, size.1 - 2),
         style::SetBackgroundColor(Color::Grey),
-        style::Print(&s.file),
         style::Print(format!(
-            "{:>1$}",
-            format!("{},{}", s.cursor.x + 1, s.cursor.y + 1),
-            size.0 as usize - s.file.len()
+            "{:6} {:<4$} {:4}:{:<3}",
+            &s.mode,
+            &s.file,
+            s.cursor.y + 1,
+            s.cursor.x + 1,
+            size.0 as usize - 16,
         )),
         style::ResetColor,
         cursor::MoveTo(0, size.1 - 1),
-        style::Print(&s.mode),
+        style::Print("/TODO"),
     )?;
     Ok(())
 }
