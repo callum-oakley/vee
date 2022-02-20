@@ -78,6 +78,7 @@ impl State {
         match self.mode {
             Mode::Normal | Mode::Select => {
                 match event.code {
+                    KeyCode::Char('q') => self.select_inside_quotes(),
                     KeyCode::Char('e') => self.select_inside_brackets(),
                     KeyCode::Char('w') => self.select_word(|c| c.is_alphanumeric() || c == '_'),
                     KeyCode::Char('y') => self.move_start_of_line(),
@@ -93,6 +94,7 @@ impl State {
                     KeyCode::Char('l') | KeyCode::Right => self.move_right(1),
                     KeyCode::Char('n') => self.move_start_of_file(),
                     KeyCode::Char('.') => self.move_end_of_file(),
+                    KeyCode::Char('Q') => self.select_outside_quotes(),
                     KeyCode::Char('E') => self.select_outside_brackets(),
                     KeyCode::Char('W') => self.select_word(|c| !c.is_whitespace()),
                     KeyCode::Char('Y') => self.move_start_of_para(),
@@ -286,6 +288,36 @@ impl State {
         self.cursor.w = self.cursor_width();
     }
 
+    fn open_quote(&self, point: Point) -> Option<Point> {
+        for y in (0..=point.y).rev() {
+            let mut x = if y == point.y {
+                point.x
+            } else {
+                self.text[y].len()
+            };
+            for c in self.text[y][..x].chars().rev() {
+                x -= c.len_utf8();
+                if c == '"' {
+                    return Some(Point { x, y });
+                }
+            }
+        }
+        None
+    }
+
+    fn close_quote(&self, point: Point) -> Option<Point> {
+        for y in point.y..self.text.len() {
+            let mut x = if y == point.y { point.x } else { 0 };
+            for c in self.text[y][x..].chars() {
+                if c == '"' {
+                    return Some(Point { x, y });
+                }
+                x += c.len_utf8();
+            }
+        }
+        None
+    }
+
     fn close_bracket(&self, point: Point) -> Option<Point> {
         let mut pending = Vec::new();
         for y in point.y..self.text.len() {
@@ -410,6 +442,16 @@ impl State {
         self.anchor = None;
     }
 
+    fn select_word(&mut self, mut wordish: impl FnMut(char) -> bool) {
+        if let Some(left) = self.left_word(&mut wordish, self.cursor.into()) {
+            if let Some(right) = self.right_word(&mut wordish, self.cursor.into()) {
+                self.move_cursor(left);
+                self.begin_select();
+                self.move_cursor(right);
+            }
+        }
+    }
+
     fn select_inside_brackets(&mut self) {
         if let Some(open) = self.open_bracket(self.cursor.into()) {
             if let Some(close) = self.close_bracket(self.cursor.into()) {
@@ -433,14 +475,25 @@ impl State {
         self.grow_selection();
     }
 
-    fn select_word(&mut self, mut wordish: impl FnMut(char) -> bool) {
-        if let Some(left) = self.left_word(&mut wordish, self.cursor.into()) {
-            if let Some(right) = self.right_word(&mut wordish, self.cursor.into()) {
-                self.move_cursor(left);
+    fn select_inside_quotes(&mut self) {
+        if let Some(open) = self.open_quote(self.cursor.into()) {
+            if let Some(close) = self.close_quote(self.cursor.into()) {
+                self.move_cursor(Point {
+                    x: open.x + 1,
+                    ..open
+                });
                 self.begin_select();
-                self.move_cursor(right);
+                self.move_cursor(close);
             }
         }
+    }
+
+    fn select_outside_quotes(&mut self) {
+        if let Some('"') = self.prev_char(self.cursor.into()) {
+            self.move_left(1);
+        }
+        self.select_inside_quotes();
+        self.grow_selection();
     }
 
     // assumes anchor is before cursor
