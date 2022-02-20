@@ -1,5 +1,4 @@
 use {
-    crate::log::log,
     anyhow::Result,
     crossterm::event::{KeyCode, KeyEvent},
     std::{fmt, fs},
@@ -79,8 +78,9 @@ impl State {
             Mode::Normal | Mode::Select => {
                 match event.code {
                     KeyCode::Char('q') => self.select_inside_quotes(),
-                    KeyCode::Char('e') => self.select_inside_brackets(),
                     KeyCode::Char('w') => self.select_word(|c| c.is_alphanumeric() || c == '_'),
+                    KeyCode::Char('e') => self.select_inside_brackets(),
+                    KeyCode::Char('r') => self.select_line(),
                     KeyCode::Char('y') => self.move_start_of_line(),
                     KeyCode::Char('u') => self.move_left_word(|c| c.is_alphanumeric() || c == '_'),
                     KeyCode::Char('i') => self.move_right_word(|c| c.is_alphanumeric() || c == '_'),
@@ -95,8 +95,9 @@ impl State {
                     KeyCode::Char('n') => self.move_start_of_file(),
                     KeyCode::Char('.') => self.move_end_of_file(),
                     KeyCode::Char('Q') => self.select_outside_quotes(),
-                    KeyCode::Char('E') => self.select_outside_brackets(),
                     KeyCode::Char('W') => self.select_word(|c| !c.is_whitespace()),
+                    KeyCode::Char('E') => self.select_outside_brackets(),
+                    KeyCode::Char('R') => self.select_para(),
                     KeyCode::Char('Y') => self.move_start_of_para(),
                     KeyCode::Char('U') => self.move_left_word(|c| !c.is_whitespace()),
                     KeyCode::Char('I') => self.move_right_word(|c| !c.is_whitespace()),
@@ -266,26 +267,34 @@ impl State {
 
     fn move_right_word(&mut self, wordish: impl FnMut(char) -> bool) {
         if let Some(right) = self.right_of(self.cursor.into()) {
-            log!("move_right_word {:?}", right);
             if let Some(point) = self.right_word(wordish, right) {
                 self.move_cursor(point);
             }
         }
     }
 
-    fn move_start_of_line(&mut self) {
-        for (x, c) in self.text[self.cursor.y].char_indices() {
-            self.cursor.x = x;
+    fn start_of_line(&self, y: usize) -> Point {
+        for (x, c) in self.text[y].char_indices() {
             if !c.is_whitespace() {
-                break;
+                return Point { x, y };
             }
         }
-        self.cursor.w = self.cursor_width();
+        Point { x: 0, y }
+    }
+
+    fn end_of_line(&self, y: usize) -> Point {
+        Point {
+            x: self.text[y].len(),
+            y,
+        }
+    }
+
+    fn move_start_of_line(&mut self) {
+        self.move_cursor(self.start_of_line(self.cursor.y));
     }
 
     fn move_end_of_line(&mut self) {
-        self.cursor.x = self.text[self.cursor.y].len();
-        self.cursor.w = self.cursor_width();
+        self.move_cursor(self.end_of_line(self.cursor.y));
     }
 
     fn open_quote(&self, point: Point) -> Option<Point> {
@@ -364,6 +373,28 @@ impl State {
         None
     }
 
+    fn start_of_para(&self, point: Point) -> Point {
+        let mut point = point;
+        while point.y > 1 {
+            if !self.text[point.y].is_empty() && self.text[point.y - 1].is_empty() {
+                return self.start_of_line(point.y);
+            }
+            point.y -= 1;
+        }
+        self.start_of_file()
+    }
+
+    fn end_of_para(&self, point: Point) -> Point {
+        let mut point = point;
+        while point.y + 1 < self.text.len() {
+            if !self.text[point.y].is_empty() && self.text[point.y + 1].is_empty() {
+                return self.end_of_line(point.y);
+            }
+            point.y += 1;
+        }
+        self.end_of_file()
+    }
+
     fn move_bracket_inside(&mut self) {
         if let Some(']' | '}' | ')') = self.next_char(self.cursor.into()) {
             if let Some(Point { x, y }) = self.open_bracket(self.cursor.into()) {
@@ -393,35 +424,29 @@ impl State {
     }
 
     fn move_start_of_para(&mut self) {
-        while self.cursor.y > 1 {
-            self.cursor.y -= 1;
-            if !self.text[self.cursor.y].is_empty() && self.text[self.cursor.y - 1].is_empty() {
-                self.move_start_of_line();
-                return;
-            }
-        }
-        self.move_start_of_file();
+        self.move_up(1);
+        self.move_cursor(self.start_of_para(self.cursor.into()));
     }
 
     fn move_end_of_para(&mut self) {
-        while self.cursor.y + 2 < self.text.len() {
-            self.cursor.y += 1;
-            if !self.text[self.cursor.y].is_empty() && self.text[self.cursor.y + 1].is_empty() {
-                self.move_end_of_line();
-                return;
-            }
-        }
-        self.move_end_of_file();
+        self.move_down(1);
+        self.move_cursor(self.end_of_para(self.cursor.into()));
+    }
+
+    fn start_of_file(&self) -> Point {
+        Point { x: 0, y: 0 }
+    }
+
+    fn end_of_file(&self) -> Point {
+        self.end_of_line(self.text.len() - 1)
     }
 
     fn move_start_of_file(&mut self) {
-        self.cursor.y = 0;
-        self.cursor = Cursor { w: 0, x: 0, y: 0 }
+        self.move_cursor(self.start_of_file());
     }
 
     fn move_end_of_file(&mut self) {
-        self.cursor.y = self.text.len() - 1;
-        self.move_end_of_line();
+        self.move_cursor(self.end_of_file());
     }
 
     fn begin_edit(&mut self) {
@@ -494,6 +519,18 @@ impl State {
         }
         self.select_inside_quotes();
         self.grow_selection();
+    }
+
+    fn select_line(&mut self) {
+        self.move_start_of_line();
+        self.begin_select();
+        self.move_end_of_line();
+    }
+
+    fn select_para(&mut self) {
+        self.move_cursor(self.start_of_para(self.cursor.into()));
+        self.begin_select();
+        self.move_cursor(self.end_of_para(self.cursor.into()));
     }
 
     // assumes anchor is before cursor
