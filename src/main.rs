@@ -1,4 +1,5 @@
 mod defer;
+mod line;
 mod log;
 mod state;
 mod ui;

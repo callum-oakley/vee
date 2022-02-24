@@ -1,7 +1,9 @@
 use {
+    crate::line::Line,
     anyhow::Result,
     crossterm::event::{KeyCode, KeyEvent},
-    std::{fmt, fs},
+    regex::Regex,
+    std::{fmt, fs, result},
     unicode_width::{UnicodeWidthChar, UnicodeWidthStr},
 };
 
@@ -37,6 +39,7 @@ pub enum Mode {
     Select,
     Insert,
     System,
+    // Search,
 }
 
 impl fmt::Display for Mode {
@@ -46,6 +49,7 @@ impl fmt::Display for Mode {
             Mode::Select => write!(f, "SELECT"),
             Mode::Insert => write!(f, "INSERT"),
             Mode::System => write!(f, "SYSTEM"),
+            // Mode::Search => write!(f, "SEARCH"),
         }
     }
 }
@@ -53,16 +57,17 @@ impl fmt::Display for Mode {
 pub struct State {
     pub mode: Mode,
     pub file: String,
-    pub text: Vec<String>,
+    pub text: Vec<Line>,
     pub cursor: Cursor,
     pub anchor: Option<Cursor>,
+    pub search: Option<result::Result<Regex, regex::Error>>,
 }
 
 impl State {
     pub fn new(file: String) -> Result<Self> {
         let text = fs::read_to_string(&file)?
             .lines()
-            .map(|s| s.to_string())
+            .map(|s| Line::new(s.to_string(), None))
             .collect();
         Ok(Self {
             mode: Mode::Normal,
@@ -70,6 +75,7 @@ impl State {
             text,
             cursor: Cursor { w: 0, x: 0, y: 0 },
             anchor: None,
+            search: None,
         })
     }
 
@@ -94,6 +100,7 @@ impl State {
                     KeyCode::Char('l') | KeyCode::Right => self.move_right(1),
                     KeyCode::Char('n') => self.move_start_of_file(),
                     KeyCode::Char('.') => self.move_end_of_file(),
+                    KeyCode::Char('/') => self.search(),
                     KeyCode::Char('Q') => self.select_outside_quotes(),
                     KeyCode::Char('W') => self.select_word(|c| !c.is_whitespace()),
                     KeyCode::Char('E') => self.select_outside_brackets(),
@@ -108,6 +115,7 @@ impl State {
                     KeyCode::Char('K') => self.move_up(5),
                     KeyCode::Char('L') => self.move_right(5),
                     KeyCode::Esc if self.mode == Mode::Select => self.end_select(),
+                    KeyCode::Esc => self.cancel_search(),
                     KeyCode::Char(' ') => {
                         self.mode = Mode::System;
                     }
@@ -131,7 +139,7 @@ impl State {
     }
 
     pub fn cursor_width(&self) -> usize {
-        self.text[self.cursor.y][..self.cursor.x].width()
+        self.text[self.cursor.y].0[..self.cursor.x].width()
     }
 
     pub fn selection(&self) -> Option<(Cursor, Cursor)> {
@@ -144,6 +152,26 @@ impl State {
         })
     }
 
+    fn search(&mut self) {
+        if let Some(selection) = self.selection() {
+            if selection.0.y == selection.1.y {
+                self.search = Some(Regex::new(&regex::escape(
+                    &self.text[selection.0.y].0[selection.0.x..selection.1.x],
+                )));
+                for line in &mut self.text {
+                    line.annotate(self.search.as_ref().and_then(|r| r.as_ref().ok()));
+                }
+            }
+        }
+    }
+
+    fn cancel_search(&mut self) {
+        self.search = None;
+        for line in &mut self.text {
+            line.annotate(None);
+        }
+    }
+
     fn move_cursor(&mut self, point: Point) {
         self.cursor.y = point.y;
         self.cursor.x = point.x;
@@ -151,11 +179,11 @@ impl State {
     }
 
     fn prev_char(&self, point: Point) -> Option<char> {
-        self.text[point.y][..point.x].chars().last()
+        self.text[point.y].0[..point.x].chars().last()
     }
 
     fn next_char(&self, point: Point) -> Option<char> {
-        self.text[point.y][point.x..].chars().next()
+        self.text[point.y].0[point.x..].chars().next()
     }
 
     fn left_of(&self, point: Point) -> Option<Point> {
@@ -175,14 +203,14 @@ impl State {
     fn update_x(&mut self) {
         let mut w = 0;
         self.cursor.x = 0;
-        for (x, c) in self.text[self.cursor.y].char_indices() {
+        for (x, c) in self.text[self.cursor.y].0.char_indices() {
             self.cursor.x = x;
             w += c.width().unwrap_or(0);
             if w > self.cursor.w {
                 return;
             }
         }
-        self.cursor.x = self.text[self.cursor.y].len()
+        self.cursor.x = self.text[self.cursor.y].0.len()
     }
 
     fn move_up(&mut self, dist: usize) {
@@ -224,7 +252,7 @@ impl State {
     fn left_word(&self, mut wordish: impl FnMut(char) -> bool, point: Point) -> Option<Point> {
         let mut point = point;
         let mut seen_word = self.next_char(point).map_or(false, &mut wordish);
-        for c in self.text[point.y][..point.x].chars().rev() {
+        for c in self.text[point.y].0[..point.x].chars().rev() {
             if seen_word && !wordish(c) {
                 break;
             } else if !seen_word && wordish(c) {
@@ -242,7 +270,7 @@ impl State {
     fn right_word(&self, mut wordish: impl FnMut(char) -> bool, point: Point) -> Option<Point> {
         let mut point = point;
         let mut seen_word = self.prev_char(point).map_or(false, &mut wordish);
-        for c in self.text[point.y][point.x..].chars() {
+        for c in self.text[point.y].0[point.x..].chars() {
             if seen_word && !wordish(c) {
                 break;
             } else if !seen_word && wordish(c) {
@@ -274,7 +302,7 @@ impl State {
     }
 
     fn start_of_line(&self, y: usize) -> Point {
-        for (x, c) in self.text[y].char_indices() {
+        for (x, c) in self.text[y].0.char_indices() {
             if !c.is_whitespace() {
                 return Point { x, y };
             }
@@ -284,7 +312,7 @@ impl State {
 
     fn end_of_line(&self, y: usize) -> Point {
         Point {
-            x: self.text[y].len(),
+            x: self.text[y].0.len(),
             y,
         }
     }
@@ -302,9 +330,9 @@ impl State {
             let mut x = if y == point.y {
                 point.x
             } else {
-                self.text[y].len()
+                self.text[y].0.len()
             };
-            for c in self.text[y][..x].chars().rev() {
+            for c in self.text[y].0[..x].chars().rev() {
                 x -= c.len_utf8();
                 if c == '"' {
                     return Some(Point { x, y });
@@ -317,7 +345,7 @@ impl State {
     fn close_quote(&self, point: Point) -> Option<Point> {
         for y in point.y..self.text.len() {
             let mut x = if y == point.y { point.x } else { 0 };
-            for c in self.text[y][x..].chars() {
+            for c in self.text[y].0[x..].chars() {
                 if c == '"' {
                     return Some(Point { x, y });
                 }
@@ -331,7 +359,7 @@ impl State {
         let mut pending = Vec::new();
         for y in point.y..self.text.len() {
             let mut x = if y == point.y { point.x } else { 0 };
-            for c in self.text[y][x..].chars() {
+            for c in self.text[y].0[x..].chars() {
                 match (c, pending.last()) {
                     ('[' | '{' | '(', _) => pending.push(c),
                     (']', Some('[')) | ('}', Some('{')) | (')', Some('(')) => {
@@ -354,9 +382,9 @@ impl State {
             let mut x = if y == point.y {
                 point.x
             } else {
-                self.text[y].len()
+                self.text[y].0.len()
             };
-            for c in self.text[y][..x].chars().rev() {
+            for c in self.text[y].0[..x].chars().rev() {
                 x -= c.len_utf8();
                 match (c, pending.last()) {
                     (']' | '}' | ')', _) => pending.push(c),
@@ -376,7 +404,7 @@ impl State {
     fn start_of_para(&self, point: Point) -> Point {
         let mut point = point;
         while point.y > 1 {
-            if !self.text[point.y].is_empty() && self.text[point.y - 1].is_empty() {
+            if !self.text[point.y].0.is_empty() && self.text[point.y - 1].0.is_empty() {
                 return self.start_of_line(point.y);
             }
             point.y -= 1;
@@ -387,7 +415,7 @@ impl State {
     fn end_of_para(&self, point: Point) -> Point {
         let mut point = point;
         while point.y + 1 < self.text.len() {
-            if !self.text[point.y].is_empty() && self.text[point.y + 1].is_empty() {
+            if !self.text[point.y].0.is_empty() && self.text[point.y + 1].0.is_empty() {
                 return self.end_of_line(point.y);
             }
             point.y += 1;

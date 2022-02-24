@@ -1,20 +1,14 @@
 use {
     crate::state::{Point, State},
-    anyhow::Result,
+    anyhow::{bail, Result},
     crossterm::{
         cursor, queue,
         style::{self, Color},
-        terminal,
+        terminal::{self, ClearType},
     },
-    lazy_static::lazy_static,
-    regex::Regex,
     std::{io, iter},
     unicode_width::UnicodeWidthChar,
 };
-
-lazy_static! {
-    static ref COMMENT: Regex = Regex::new("//").unwrap();
-}
 
 fn draw_text<W>(mut out: W, s: &State, size: (u16, u16)) -> Result<usize>
 where
@@ -33,18 +27,20 @@ where
         .iter()
         .enumerate()
     {
-        let comment = COMMENT.find(line).map(|m| m.start());
         queue!(out, cursor::MoveTo(0, y as u16))?;
         let mut w = 0;
-        for (x, c) in line.char_indices().chain(iter::once((line.len(), ' '))) {
+        for (x, c) in line.0.char_indices().chain(iter::once((line.0.len(), ' '))) {
             let p = Point { x, y: y + offset };
             w += c.width().unwrap_or(0) as u16;
             if w >= size.0 {
                 // TODO wrap or scroll
                 break;
             }
-            if comment.map(|start| x >= start).unwrap_or(false) {
+            if line.1.comment_indices.contains(&x) {
                 queue!(out, style::SetForegroundColor(Color::DarkRed))?;
+            }
+            if line.1.match_indices.contains(&x) {
+                queue!(out, style::SetBackgroundColor(Color::Red))?;
             }
             if selection
                 .map(|(start, end)| p >= start.into() && p < end.into())
@@ -54,6 +50,7 @@ where
             }
             queue!(out, style::Print(c), style::ResetColor)?;
         }
+        queue!(out, terminal::Clear(ClearType::UntilNewLine))?;
     }
     Ok(offset)
 }
@@ -76,8 +73,28 @@ where
         )),
         style::ResetColor,
         cursor::MoveTo(0, size.1 - 1),
-        style::Print("/TODO"),
     )?;
+    Ok(())
+}
+
+fn draw_search<W>(mut out: W, s: &State, size: (u16, u16)) -> Result<()>
+where
+    W: io::Write,
+{
+    queue!(out, cursor::MoveTo(0, size.1 - 1))?;
+    match &s.search {
+        Some(Ok(re)) => {
+            queue!(out, style::Print('/'), style::Print(re))?;
+        }
+        Some(Err(regex::Error::Syntax(msg))) => {
+            queue!(out, style::Print("! "), style::Print(msg))?;
+        }
+        Some(Err(err)) => {
+            bail!("Unhandled error parsing regex for search: {}", err);
+        }
+        None => (),
+    }
+    queue!(out, terminal::Clear(ClearType::UntilNewLine))?;
     Ok(())
 }
 
@@ -85,12 +102,14 @@ pub fn draw<W>(mut out: W, s: &State, size: (u16, u16)) -> Result<()>
 where
     W: io::Write,
 {
-    queue!(out, terminal::Clear(terminal::ClearType::All))?;
+    queue!(out, cursor::Hide)?;
     let offset = draw_text(&mut out, s, size)?;
     draw_status(&mut out, s, size)?;
+    draw_search(&mut out, s, size)?;
     queue!(
         out,
-        cursor::MoveTo(s.cursor_width() as u16, (s.cursor.y - offset) as u16)
+        cursor::MoveTo(s.cursor_width() as u16, (s.cursor.y - offset) as u16),
+        cursor::Show,
     )?;
     out.flush()?;
     Ok(())
