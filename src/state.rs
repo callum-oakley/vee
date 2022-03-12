@@ -36,7 +36,6 @@ impl From<Cursor> for Point {
 #[derive(PartialEq)]
 pub enum Mode {
     Normal,
-    Select,
     Insert,
     System,
     // Search,
@@ -46,7 +45,6 @@ impl fmt::Display for Mode {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Mode::Normal => write!(f, "NORMAL"),
-            Mode::Select => write!(f, "SELECT"),
             Mode::Insert => write!(f, "INSERT"),
             Mode::System => write!(f, "SYSTEM"),
             // Mode::Search => write!(f, "SEARCH"),
@@ -81,7 +79,7 @@ impl State {
 
     pub fn handle(&mut self, event: KeyEvent) -> bool {
         match self.mode {
-            Mode::Normal | Mode::Select => {
+            Mode::Normal => {
                 match event.code {
                     KeyCode::Char('q') => self.select_inside_quotes(),
                     KeyCode::Char('w') => self.select_word(|c| c.is_alphanumeric() || c == '_'),
@@ -92,13 +90,15 @@ impl State {
                     KeyCode::Char('i') => self.move_right_word(|c| c.is_alphanumeric() || c == '_'),
                     KeyCode::Char('o') => self.move_end_of_line(),
                     KeyCode::Char('p') => self.move_bracket_inside(),
-                    KeyCode::Char('s') => self.begin_select(),
+                    KeyCode::Char('s') => self.anchor = Some(self.cursor),
                     KeyCode::Char('f') => self.begin_edit(),
                     KeyCode::Char('h') | KeyCode::Left => self.move_left(1),
                     KeyCode::Char('j') | KeyCode::Down => self.move_down(1),
                     KeyCode::Char('k') | KeyCode::Up => self.move_up(1),
                     KeyCode::Char('l') | KeyCode::Right => self.move_right(1),
                     KeyCode::Char('n') => self.move_start_of_file(),
+                    KeyCode::Char('m') => self.move_next_match(),
+                    KeyCode::Char(',') => self.move_prev_match(),
                     KeyCode::Char('.') => self.move_end_of_file(),
                     KeyCode::Char('/') => self.search(),
                     KeyCode::Char('Q') => self.select_outside_quotes(),
@@ -114,8 +114,13 @@ impl State {
                     KeyCode::Char('J') => self.move_down(5),
                     KeyCode::Char('K') => self.move_up(5),
                     KeyCode::Char('L') => self.move_right(5),
-                    KeyCode::Esc if self.mode == Mode::Select => self.end_select(),
-                    KeyCode::Esc => self.cancel_search(),
+                    KeyCode::Esc => {
+                        if self.anchor.is_some() {
+                            self.anchor = None
+                        } else {
+                            self.cancel_search()
+                        }
+                    }
                     KeyCode::Char(' ') => {
                         self.mode = Mode::System;
                     }
@@ -485,21 +490,11 @@ impl State {
         self.mode = Mode::Normal;
     }
 
-    fn begin_select(&mut self) {
-        self.mode = Mode::Select;
-        self.anchor = Some(self.cursor);
-    }
-
-    fn end_select(&mut self) {
-        self.mode = Mode::Normal;
-        self.anchor = None;
-    }
-
     fn select_word(&mut self, mut wordish: impl FnMut(char) -> bool) {
         if let Some(left) = self.left_word(&mut wordish, self.cursor.into()) {
             if let Some(right) = self.right_word(&mut wordish, self.cursor.into()) {
                 self.move_cursor(left);
-                self.begin_select();
+                self.anchor = Some(self.cursor);
                 self.move_cursor(right);
             }
         }
@@ -512,7 +507,7 @@ impl State {
                     x: open.x + 1,
                     ..open
                 });
-                self.begin_select();
+                self.anchor = Some(self.cursor);
                 self.move_cursor(close);
             }
         }
@@ -535,7 +530,7 @@ impl State {
                     x: open.x + 1,
                     ..open
                 });
-                self.begin_select();
+                self.anchor = Some(self.cursor);
                 self.move_cursor(close);
             }
         }
@@ -551,13 +546,13 @@ impl State {
 
     fn select_line(&mut self) {
         self.move_start_of_line();
-        self.begin_select();
+        self.anchor = Some(self.cursor);
         self.move_end_of_line();
     }
 
     fn select_para(&mut self) {
         self.move_cursor(self.start_of_para(self.cursor.into()));
-        self.begin_select();
+        self.anchor = Some(self.cursor);
         self.move_cursor(self.end_of_para(self.cursor.into()));
     }
 

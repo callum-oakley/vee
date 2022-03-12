@@ -50,7 +50,9 @@ where
             }
             queue!(out, style::Print(c), style::ResetColor)?;
         }
-        queue!(out, terminal::Clear(ClearType::UntilNewLine))?;
+        if w < size.0 {
+            queue!(out, terminal::Clear(ClearType::UntilNewLine))?;
+        }
     }
     Ok(offset)
 }
